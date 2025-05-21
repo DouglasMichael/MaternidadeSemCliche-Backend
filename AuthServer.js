@@ -1,10 +1,10 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
+const { OAuth2Client } = require('google-auth-library');
 require("dotenv").config();
 const app = express();
 const port = 3000;
-const ip = "192.168.15.22"
 
 const db = require("./connection");
 
@@ -50,10 +50,10 @@ app.post("/login", (req, res) => {
         return res.status(401).json({ mensagem: "Email ou senha inválidos" });
       } else {
         const user = {
+          nome: row.nome,
           email: row.email,
           user_id: row.user_id,
           telefone: row.telefone,
-          cpf: row.cpf,
         };
         //ciração do TOKEN DE ACESSO com as informações passadas
         const accessToken = GenerateAccessToken(user);
@@ -134,7 +134,7 @@ app.post("/token", async (req, res) => {
   try {
     // Tentativa de verificar o access token
     const user = await VerifyAccessToken(accessToken);
-    return res.status(200).json({ mensagem: "Access token válido"});
+    return res.status(200).json({ mensagem: "Access token válido", user:user});
   } catch (erro) {
     // Se o access token for inválido, tenta verificar o refresh token
     console.log("Access token inválido. Tentando verificar o refresh token...");
@@ -166,6 +166,21 @@ app.post("/token", async (req, res) => {
     }
   }
 });
+
+app.post("/tokenGoogle", async (req,res) =>{
+  const {tokenID} = req.body
+  const client = new OAuth2Client("371489135-rcgaffospvilhdff34dr7fo2ae8f88qd.apps.googleusercontent.com");
+  try{
+    const ticket = await client.verifyIdToken({
+      idToken: tokenID,
+      audience: "371489135-rcgaffospvilhdff34dr7fo2ae8f88qd.apps.googleusercontent.com"
+    })
+    
+    return res.status(200).json({user: {nome: ticket.payload.name, email: ticket.payload.email, user_id: "", picture: ticket.payload.picture}})
+  } catch(error){
+    return res.status(403)
+  }
+})
 
 
 app.post("/consulta", async (req,res) =>{
@@ -218,6 +233,6 @@ function generateRefreshToken(user) {
 }
 
 // Iniciar o servidor
-app.listen(port, ip,  () => {
-  console.log(`Servidor rodando ${ip} ${port}`);
+app.listen(port, process.env.IP,  () => {
+  console.log(`Servidor rodando ${process.env.IP} ${port}`);
 });
