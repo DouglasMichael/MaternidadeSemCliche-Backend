@@ -4,6 +4,7 @@ const bcrypt = require("bcrypt");
 const { OAuth2Client } = require('google-auth-library');
 require("dotenv").config();
 const app = express();
+const cors = require('cors')
 const port = 3000;
 
 const db = require("./connection");
@@ -28,42 +29,43 @@ app.post("/login", (req, res) => {
   const email = req.body.email;
   const senha = req.body.senha;
 
-  // Usando parâmetros preparados para evitar SQL Injection
   const sql = "SELECT * FROM usuarios WHERE email = ?";
 
-  db.get(sql, [email], (err, row) => {
-    if (err) {
-      return res.status(400).json({ error: err.mensagem });
-    }
-
-    if (!row) {
-      res.status(401).json({ mensagem: "Email ou senha inválidos" });
-    }
-
-    bcrypt.compare(senha, row.senha, (err, result) => {
+  try {
+    db.get(sql, [email], (err, row) => {
       if (err) {
-        return res.status(500).json({ mensagem: "erro ao comparar senha" });
+        return res.status(400).json({ error: err.message }); // corrigido: err.message, não err.mensagem
       }
 
-      // Verifica se o usuário foi encontrado
-      if (!result) {
-        return res.status(401).json({ mensagem: "Email ou senha inválidos" });
-      } else {
-        const user = {
-          nome: row.nome,
-          email: row.email,
-          user_id: row.user_id,
-          telefone: row.telefone,
-        };
-        //ciração do TOKEN DE ACESSO com as informações passadas
-        const accessToken = GenerateAccessToken(user);
-        //criação do TOKEN DE ATUALIZAÇÃO com as informações passadas
-        const refreshToken = generateRefreshToken(user);
-        return res.json({ accessToken: accessToken, refreshToken: refreshToken });
+      if (!row) {
+        return res.status(401).json({ mensagem: "Email ou senha inválidos" }); // <--- ADICIONE O return AQUI
       }
+
+      bcrypt.compare(senha, row.senha, (err, result) => {
+        if (err) {
+          return res.status(500).json({ mensagem: "Erro ao comparar senha" });
+        }
+
+        if (!result) {
+          return res.status(401).json({ mensagem: "Email ou senha inválidos" });
+        } else {
+          const user = {
+            nome: row.nome,
+            email: row.email,
+            user_id: row.user_id,
+            telefone: row.telefone,
+          };
+          const accessToken = GenerateAccessToken(user);
+          const refreshToken = generateRefreshToken(user);
+          return res.json({ accessToken: accessToken, refreshToken: refreshToken });
+        }
+      });
     });
-  });
+  } catch (error) {
+    return res.status(500).json({ mensagem: "Erro no servidor" });
+  }
 });
+
 
 app.post("/register", async (req, res) => {
   const { email, senha, nome, nascimento, telefone, cpf } = req.body;
@@ -177,6 +179,7 @@ app.post("/tokenGoogle", async (req,res) =>{
     })
     
     return res.status(200).json({user: {nome: ticket.payload.name, email: ticket.payload.email, user_id: "", picture: ticket.payload.picture}})
+    console.log(res)
   } catch(error){
     return res.status(403)
   }
@@ -232,6 +235,7 @@ function generateRefreshToken(user) {
   return jwt.sign(user, process.env.REFRESH_TOKEN, { expiresIn: "24h" });
 }
 
+app.use(cors({origin:'*'}))
 // Iniciar o servidor
 app.listen(port, process.env.IP,  () => {
   console.log(`Servidor rodando ${process.env.IP} ${port}`);
