@@ -1,4 +1,5 @@
 const express = require("express");
+const transporter = require('./EmailSender.js'); 
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const { OAuth2Client } = require('google-auth-library');
@@ -98,15 +99,15 @@ app.post("/register", async (req, res) => {
 
       // Inserir o novo usuário no banco de dados
       const stmt = db.prepare(
-        "INSERT INTO usuarios (nome, data_nascimento, email, telefone, senha, cpf) VALUES (?, ?, ?, ?, ?, ?)"
+        "INSERT INTO usuarios (nome, data_nascimento, email, telefone, senha, cpf, codigo_verificacao) VALUES (?, ?, ?, ?, ?, ?, ?)"
       );
       stmt.run(
-        [nome, nascimento, email, telefone, hashedSenha, cpf],
+        [nome, nascimento, email, telefone, hashedSenha, cpf, null],
         function (err) {
           if (err) {
             return res
               .status(500)
-              .json({ mensagem: "Erro ao cadastrar o usuário." });
+              .json({ mensagem: `Erro ao cadastrar o usuário. ${err}` });
           }
 
           // Gerar tokens após o cadastro
@@ -204,6 +205,160 @@ app.post("/consulta", async (req,res) =>{
     }
 })
 
+app.post('/esqueciSenha/enviarEmail', async (req, res) => {
+  const { to } = req.body;
+  try {
+    const codigo_verificacao = await generateVerifyCode(to)
+    const info = await transporter.sendMail({
+      from: `"Maternidade Sem Clichê App" <${process.env.GMAIL_USER}>`,
+      to: to,
+      subject: "Verificação: Troca de senha Maternidade App",
+      text: `Seu código de verificação para recuperação de conta:
+              ${codigo_verificacao}`
+    });
+
+    console.log("Mensagem enviada: %s", info.messageId);
+    res.status(200).json(mensagem="E-mail enviado com sucesso via Nodemailer!");
+
+  } catch (error) {
+    console.error("Erro ao enviar e-mail:", error);
+    res.status(500).json(mensagem="Falha ao enviar e-mail.");
+  }
+});
+
+app.post('/esqueciSenha/codigoVerificacao', async (req, res) => {
+  const { to, code } = req.body;
+  try {
+    const isValidCode = await VerifyCode(to,code)
+    
+    if (isValidCode) {
+      console.log("Codigo válido");
+      cleanVerifyCode(to,code)
+      res.status(200).json(mensagem="Codigo válido!");
+    }
+    else{
+      res.status(400).json(mensagem="Codigo não válido");
+    }
+
+  } catch (error) {
+    console.error("Erro ao verificar codigo:", error);
+    res.status(500).json(mensagem="Falha ao verificar codigo.");
+  }
+});
+
+app.post('/consulta/enviarEmail', async (req, res) => {
+  const { to, data } = req.body;
+
+  try {
+
+    const info = await transporter.sendMail({
+      from: `"Maternidade Sem Clichê App" <${process.env.GMAIL_USER}>`,
+      to: to,
+      subject: "Confirmação do sua Consulta: Um tempo para você na sua jornada da maternidade`",
+      text: `
+Olá,
+
+Sua consulta de acolhimento psicológico está confirmada! Este é um passo muito importante de autocuidado na sua jornada.
+
+Aqui estão os detalhes do nosso encontro:
+
+- Data: ${data}
+- Local: A sessão será online, através do link que será enviado 15 minutos antes do nosso horário.
+- Com a psicóloga: Letícia Carazzatto
+
+Este será um espaço seguro, confidencial e sem julgamentos, dedicado inteiramente a você e ao seu bem-estar. Para nosso encontro online, sugiro que procure um lugar tranquilo e utilize fones de ouvido para garantir sua privacidade.
+
+Caso precise reagendar ou cancelar, peço que me avise com pelo menos 24 horas de antecedência, para que outra pessoa possa aproveitar o horário.
+
+Estou aqui para te acolher.
+
+Até breve!
+
+Atenciosamente,
+Psicóloga Perinatal e da Parentalida`
+    });
+
+    console.log("Mensagem enviada: %s", info.messageId);
+    res.status(200).json(mensagem="E-mail enviado com sucesso via Nodemailer!");
+
+  } catch (error) {
+    console.error("Erro ao enviar e-mail:", error);
+    res.status(500).json(mensagem="Falha ao enviar e-mail.");
+  }
+});
+
+async function cleanVerifyCode(email) {
+  const sql = `UPDATE usuarios SET codigo_verificacao = NULL WHERE email = ?`;
+  const result = db.run(sql, email);
+  if (result.changes === 0) {
+    console.warn(`Atenção: Nenhum usuário encontrado com o e-mail: ${email}`);
+    throw(Error(` Nenhum usuário encontrado com o e-mail: ${email}`))
+  }
+
+    console.log(`Codigo de verificação limpo.`);
+}
+
+async function generateVerifyCode(email){
+    const code = Math.floor(10000 + Math.random() * 90000)
+    try{
+    const sql = `UPDATE usuarios SET codigo_verificacao = ? WHERE email = ?`;
+    const result = db.run(sql, [code, email]);
+     if (result.changes === 0) {
+       console.warn(`Atenção: Nenhum usuário encontrado com o e-mail: ${email}`);
+       throw(Error(` Nenhum usuário encontrado com o e-mail: ${email}`))
+
+    }
+
+    console.log(`Código ${code} gerado com sucesso para o e-mail ${email}.`);
+  
+    return code;
+
+  } catch (error) {
+    console.error("Erro ao gerar código de verificação:", error);
+    return null;
+  } 
+}
+
+async function VerifyCode(email,code){
+    if (!email || !code) {
+    console.error("E-mail ou código não fornecido.");
+    return false;
+  }
+
+  try {
+
+    // 2. Cria a query para buscar o código do usuário pelo e-mail
+    const sql = `SELECT codigo_verificacao FROM usuarios WHERE email = "michael.lopes@email.com"`;
+
+    const user = db.get(sql);
+
+    // 3. Verifica se o usuário foi encontrado
+    if (!user) {
+      console.log(`Tentativa de verificação para um e-mail não cadastrado: ${email}`);
+      return false; // Usuário não existe, então o código não pode ser válido
+    }
+
+    console.log(user)
+
+    const storedCode = String(user.codigo_verificacao);
+    console.log(storedCode)
+    const providedCode = String(code);
+    console.log(providedCode)
+
+    if (storedCode === providedCode) {
+      console.log(`Código verificado com sucesso para o e-mail: ${email}`);
+      return true;
+    } else {
+      console.log(`Código inválido (${providedCode}) fornecido para o e-mail: ${email}`);
+      return false; 
+    }
+
+  } catch (error) {
+    console.error("Erro no processo de verificação de código:", error);
+    return false; // Retorna false em caso de qualquer erro no processo
+  }
+}
+
 function VerifyAccessToken(token) {
   return new Promise((resolve, reject) => {
     jwt.verify(token, process.env.ACCESS_TOKEN, (err, result) => {
@@ -236,7 +391,6 @@ function generateRefreshToken(user) {
 }
 
 app.use(cors({origin:'*'}))
-// Iniciar o servidor
 app.listen(port, process.env.IP,  () => {
   console.log(`Servidor rodando ${process.env.IP} ${port}`);
 });

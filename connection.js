@@ -10,6 +10,5 @@ const db = new sqlite3.Database('./maternidadeSemClicheDB.db', (err) => {
     console.log('Conexão com o banco de dados estabelecida.');
   }
 });
-
 // Exporta a conexão para ser utilizada em outros arquivos
 module.exports = db;
