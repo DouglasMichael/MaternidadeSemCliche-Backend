@@ -6,9 +6,11 @@ const { OAuth2Client } = require('google-auth-library');
 require("dotenv").config();
 const app = express();
 const cors = require('cors')
+const util = require('util');
 const port = 3000;
 
 const db = require("./connection");
+const dbGet = util.promisify(db.get).bind(db); // transforma db.get em async
 
 // Configurar o Express para responder com JSON
 app.use(express.json());
@@ -188,14 +190,22 @@ app.post("/tokenGoogle", async (req,res) =>{
 
 
 app.post("/consulta", async (req,res) =>{
-    const { motivo, data, accessToken } = req.body
+    const { motivo, data, user_id } = req.body
 
     try {
-        const user = await VerifyAccessToken(accessToken)
         const query = 'INSERT INTO consultas_psicologia (motivo_consulta, data_consulta, user_id) VALUES (?, ?, ?)';
-        db.run(query, [motivo, data, user.user_id], (err) => {
+
+        if(!motivo){
+          return res.status(500).json({mensagem: "Motivo em branco!"})
+        }
+
+        if(!data){
+          return res.status(500).json({mensagem: "Escolha uma data disponível!"})
+        }
+
+        db.run(query, [motivo, data, user_id], (err) => {
             if(err){
-                return res.status(500).json({menagem: "Erro ao registrar a consulta"})
+                return res.status(500).json({mensagem: "Erro ao registrar a consulta"})
             }
 
             return res.status(201).json({mensagem: 'Consulta registrada com sucesso!'});
@@ -245,6 +255,33 @@ app.post('/esqueciSenha/codigoVerificacao', async (req, res) => {
     res.status(500).json(mensagem="Falha ao verificar codigo.");
   }
 });
+
+app.put('/esqueciSenha/redefinirSenha', async (req, res) => {
+  const { email, novaSenha } = req.body
+
+
+  if (!email || !novaSenha) {
+    return res.status(400).json({ mensagem: 'Dados incompletos.' });
+  }
+
+  try {
+    const CleanCode = cleanVerifyCode(email)
+    if (CleanCode) {
+      const senhaHash = await bcrypt.hash(novaSenha, 10)
+      const sql = `UPDATE usuarios SET senha = ? WHERE email = ?`
+      db.run(sql, [senhaHash, email], (err) => {
+        if (err) {
+          return res.status(500).json({mensagem: "Erro ao registrar a consulta"}) 
+        }
+        
+        return res.status(200).json({mensagem: 'Senha atualizada com sucesso!'});
+        
+      })
+    }
+  } catch (error) {
+    return res.status(500).json({mensagem: 'Erro ao atualizar!'});
+  }
+})
 
 app.post('/consulta/enviarEmail', async (req, res) => {
   const { to, data } = req.body;
@@ -296,6 +333,7 @@ async function cleanVerifyCode(email) {
   }
 
     console.log(`Codigo de verificação limpo.`);
+    return true
 }
 
 async function generateVerifyCode(email){
@@ -319,45 +357,41 @@ async function generateVerifyCode(email){
   } 
 }
 
-async function VerifyCode(email,code){
-    if (!email || !code) {
+async function VerifyCode(email, code) {
+  if (!email || !code) {
     console.error("E-mail ou código não fornecido.");
     return false;
   }
 
   try {
+    const sql = `SELECT codigo_verificacao FROM usuarios WHERE email = ?`;
+    const user = await dbGet(sql, [email]); // agora funciona com await
 
-    // 2. Cria a query para buscar o código do usuário pelo e-mail
-    const sql = `SELECT codigo_verificacao FROM usuarios WHERE email = "michael.lopes@email.com"`;
-
-    const user = db.get(sql);
-
-    // 3. Verifica se o usuário foi encontrado
     if (!user) {
-      console.log(`Tentativa de verificação para um e-mail não cadastrado: ${email}`);
-      return false; // Usuário não existe, então o código não pode ser válido
+      console.log(`Usuário não encontrado para o e-mail: ${email}`);
+      return false;
     }
 
-    console.log(user)
+    console.log("Usuário encontrado:", user);
 
     const storedCode = String(user.codigo_verificacao);
-    console.log(storedCode)
     const providedCode = String(code);
-    console.log(providedCode)
 
     if (storedCode === providedCode) {
       console.log(`Código verificado com sucesso para o e-mail: ${email}`);
       return true;
     } else {
       console.log(`Código inválido (${providedCode}) fornecido para o e-mail: ${email}`);
-      return false; 
+      return false;
     }
 
   } catch (error) {
     console.error("Erro no processo de verificação de código:", error);
-    return false; // Retorna false em caso de qualquer erro no processo
+    return false;
   }
 }
+
+
 
 function VerifyAccessToken(token) {
   return new Promise((resolve, reject) => {
